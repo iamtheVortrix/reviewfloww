@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pitch Map — VORTRIX Sales</title>
+<meta name="theme-color" content="#0d0b08">
+<link rel="icon" href="icon.svg">
+<link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+<style>
+:root{--brand:#d8a94e;--bg:#0d0b08;--card:#171310;--text:#f5efe4;--muted:#a89f8d;--green:#4ade80;--red:#f87171;--blue:#60a5fa}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
+#topbar{position:fixed;top:0;left:0;right:0;z-index:20;background:rgba(13,11,8,.92);backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(216,169,78,.2);padding:10px 12px}
+#topbar .row1{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#topbar h1{font-size:16px;margin:0;letter-spacing:.3px}
+#topbar h1 a{color:var(--muted);text-decoration:none;font-size:13px;font-weight:400;margin-right:8px}
+#stats{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.chip{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:99px;
+  padding:5px 11px;font-size:12.5px;color:var(--text)}
+.chip b{color:var(--brand)}
+.iconbtn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:var(--text);
+  border-radius:10px;padding:7px 10px;font-size:13px;cursor:pointer}
+#map{position:fixed;top:0;left:0;right:0;bottom:0}
+#mapFallback{position:fixed;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:30px;color:var(--muted)}
+#fabs{position:fixed;right:12px;top:50%;transform:translateY(-50%);z-index:15;display:flex;flex-direction:column;gap:10px}
+.fab{width:48px;height:48px;border-radius:50%;background:rgba(13,11,8,.9);border:1px solid rgba(216,169,78,.45);
+  color:var(--text);font-size:20px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+.fab:active{transform:scale(.93)}
+.fab.on{background:var(--brand);color:#1a1206}
+.mk{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:13px;color:#0d0b08;border:2px solid rgba(0,0,0,.45);cursor:pointer;
+  box-shadow:0 4px 14px rgba(0,0,0,.55);transition:transform .15s}
+.mk:active{transform:scale(1.2)}
+.mk-todo{background:var(--brand)}.mk-bought{background:var(--green)}.mk-not{background:var(--red)}.mk-done{background:var(--blue)}
+.mk.sel{outline:3px solid #fff}
+#sheet{position:fixed;left:0;right:0;bottom:0;z-index:15;background:rgba(13,11,8,.96);backdrop-filter:blur(12px);
+  border-top:1px solid rgba(216,169,78,.25);border-radius:18px 18px 0 0;max-height:42vh;display:flex;flex-direction:column}
+#sheetHead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;flex:none}
+#sheetHead b{font-size:14px}
+#sheetHead span{color:var(--muted);font-size:12px}
+#stopList{overflow-y:auto;padding:0 12px 16px}
+.stop{display:flex;align-items:center;gap:12px;padding:11px 8px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer}
+.stop .n{width:28px;height:28px;flex:none;border-radius:50%;background:var(--brand);color:#0d0b08;
+  font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center}
+.stop .inf{flex:1;min-width:0}
+.stop .nm{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stop .mt{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stop .st{width:12px;height:12px;flex:none;border-radius:50%}
+.st-todo{background:var(--brand)}.st-bought{background:var(--green)}.st-not{background:var(--red)}.st-done{background:var(--blue)}
+.stop .nav{flex:none;font-size:16px;text-decoration:none}
+#bizcard{position:fixed;left:12px;right:12px;bottom:14px;z-index:30;background:#1c1712;
+  border:1px solid rgba(216,169,78,.4);border-radius:18px;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.6)}
+#bizcard .hd{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
+#bcName{font-size:17px;font-weight:700}
+#bcAddr{font-size:13px;color:var(--muted);margin-top:3px}
+#bcClose{background:none;border:0;color:var(--muted);font-size:18px;cursor:pointer;padding:4px}
+.srow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.sbtn{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:var(--text);
+  border-radius:12px;padding:11px 6px;font-size:13.5px;cursor:pointer}
+.sbtn.on-todo{border-color:var(--brand);background:rgba(216,169,78,.18)}
+.sbtn.on-bought{border-color:var(--green);background:rgba(74,222,128,.15)}
+.sbtn.on-not{border-color:var(--red);background:rgba(248,113,113,.15)}
+.sbtn.on-done{border-color:var(--blue);background:rgba(96,165,250,.15)}
+#bcNote{width:100%;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);border-radius:12px;
+  color:var(--text);padding:12px;font-size:14px;font-family:inherit;margin-bottom:10px}
+.bcrow{display:flex;gap:8px}
+.btn{flex:1;background:linear-gradient(135deg,var(--brand),#b57f2a);color:#1a1206;border:0;border-radius:14px;
+  padding:13px;font-size:15px;font-weight:700;cursor:pointer}
+.btn.ghost{background:rgba(255,255,255,.07);color:var(--text);border:1px solid rgba(255,255,255,.12)}
+.hidden{display:none!important}
+#modal{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.7);display:flex;align-items:flex-end;justify-content:center}
+#modalCard{background:#1c1712;border:1px solid rgba(216,169,78,.35);border-radius:20px 20px 0 0;
+  width:100%;max-width:560px;max-height:86vh;overflow-y:auto;padding:20px 18px 30px}
+#modalCard h2{font-size:18px;margin:0 0 6px}
+#modalCard p{font-size:13px;color:var(--muted);line-height:1.6;margin:0 0 12px}
+#modalCard textarea{width:100%;min-height:130px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);
+  border-radius:12px;color:var(--text);padding:12px;font-size:13.5px;font-family:monospace;resize:vertical}
+#modalCard input[type=text]{width:100%;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);
+  border-radius:12px;color:var(--text);padding:11px;font-size:14px;margin-bottom:10px}
+#modalCard pre{background:rgba(0,0,0,.4);border-radius:10px;padding:10px;font-size:12px;color:var(--muted);overflow-x:auto}
+.mrow{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+#prog{font-size:13px;color:var(--brand);margin-top:10px;min-height:18px}
+@media(min-width:700px){
+  #sheet{left:auto;right:16px;bottom:16px;width:360px;border-radius:18px;max-height:60vh;border:1px solid rgba(216,169,78,.25)}
+  #bizcard{left:auto;right:16px;bottom:16px;width:380px}
+  #modal{align-items:center}
+  #modalCard{border-radius:20px}
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="row1">
+    <h1><a href="admin.html">← Admin</a>🗺 Pitch Map</h1>
+    <div>
+      <button class="iconbtn" onclick="openModal()">＋ Import</button>
+      <button class="iconbtn" onclick="exportJSON()">⤓ Backup</button>
+    </div>
+  </div>
+  <div id="stats"></div>
+</div>
+
+<div id="map"></div>
+<div id="mapFallback"><div><div style="font-size:44px;margin-bottom:14px">🗺</div><p>Map library failed to load.<br>Check your internet connection and reload.</p></div></div>
+
+<div id="fabs">
+  <button class="fab on" id="fab3d" onclick="toggle3D()" title="Toggle 3D">🏙</button>
+  <button class="fab" onclick="locateMe()" title="My location">🎯</button>
+  <button class="fab" onclick="optimize()" title="Optimize route">⚡</button>
+</div>
+
+<div id="sheet">
+  <div id="sheetHead" onclick="document.getElementById('stopList').classList.toggle('hidden')">
+    <b id="sheetTitle">Day plan</b><span id="sheetMeta">tap to expand ▾</span>
+  </div>
+  <div id="stopList"></div>
+</div>
+
+<div id="bizcard" class="hidden">
+  <div class="hd">
+    <div><div id="bcName"></div><div id="bcAddr"></div></div>
+    <button id="bcClose" onclick="closeCard()">✕</button>
+  </div>
+  <div class="srow">
+    <button class="sbtn" data-s="todo" onclick="setStatus('todo')">🕐 To visit</button>
+    <button class="sbtn" data-s="bought" onclick="setStatus('bought')">✅ Bought</button>
+    <button class="sbtn" data-s="not" onclick="setStatus('not')">❌ Not bought</button>
+    <button class="sbtn" data-s="done" onclick="setStatus('done')">✔ Done</button>
+  </div>
+  <input id="bcNote" placeholder="1-line note… e.g. owner Ramesh, callback Friday">
+  <div class="bcrow">
+    <button class="btn ghost" id="bcNav" onclick="navigateTo()">Navigate ↗</button>
+    <button class="btn" onclick="saveNote()">Save note</button>
+  </div>
+</div>
+
+<div id="modal" class="hidden">
+  <div id="modalCard">
+    <h2>＋ Add businesses</h2>
+    <p>Paste one per line. Either <b>name, address</b> (auto-located) or <b>name, lat, lng</b> (instant).<br>Target 60–70 a day. Imported pins appear on the map.</p>
+    <pre>Cafe Mocha, Linking Road, Bandra West
+Salon Bliss, 19.0649, 72.8229</pre>
+    <textarea id="impText" placeholder="Paste your list here…"></textarea>
+    <input type="text" id="impCity" value="Mumbai" placeholder="City (used for address lookup)">
+    <div id="prog"></div>
+    <div class="mrow">
+      <button class="btn" onclick="doImport()">Geocode &amp; add</button>
+      <button class="btn ghost" onclick="loadDemo()">Bandra demo</button>
+    </div>
+    <div class="mrow">
+      <button class="btn ghost" onclick="importFile()">⤒ Import JSON backup</button>
+      <button class="btn ghost" onclick="resetDay()">↺ Reset statuses</button>
+      <button class="btn ghost" onclick="clearAll()" style="color:#ff9a9a">🗑 Delete all</button>
+    </div>
+    <div class="mrow"><button class="btn ghost" onclick="closeModal()">Close</button></div>
+    <input type="file" id="filePick" accept=".json,.csv,.txt" class="hidden">
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   PITCH MAP v1 — daily sales route command center
+   Static page. All data stays in this browser (localStorage).
+   Map: MapLibre GL + OpenFreeMap (free, no key). Routing: OSRM.
+   ============================================================ */
+var LS_KEY = "vortrix_pitch_v1";
+var S = { city: "Mumbai", businesses: [], order: [], legs: null, routeMeta: null };
+var map = null, mapReady = false, markers = {}, userLoc = null, userMarker = null;
+var curId = null, is3D = true;
+
+function $(id){ return document.getElementById(id); }
+function uid(){ return "b" + Date.now().toString(36) + Math.floor(Math.random()*1e4).toString(36); }
+
+function save(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
+}
+function load(){
+  try{
+    var raw = localStorage.getItem(LS_KEY);
+    if(raw){ var d = JSON.parse(raw); if(d && d.businesses) S = d; }
+  }catch(e){}
+  if($("impCity")) $("impCity").value = S.city || "Mumbai";
+}
+
+/* ---------- map ---------- */
+function initMap(){
+  if(typeof maplibregl === "undefined"){ $("mapFallback").style.display = "flex"; return; }
+  map = new maplibregl.Map({
+    container: "map",
+    style: "https://tiles.openfreemap.org/styles/liberty",
+    center: [72.8278, 19.0596], // Bandra West, Mumbai
+    zoom: 14.5, pitch: 60, bearing: -15, maxPitch: 70
+  });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+  map.on("load", function(){
+    // 3D buildings
+    try{
+      var style = map.getStyle(), srcId = null;
+      Object.keys(style.sources).forEach(function(k){ if(/openmaptiles/i.test(k)) srcId = k; });
+      if(!srcId) Object.keys(style.sources).forEach(function(k){ if(style.sources[k].type === "vector" && !srcId) srcId = k; });
+      if(srcId){
+        map.addLayer({
+          id: "3d-buildings", source: srcId, "source-layer": "building",
+          type: "fill-extrusion", minzoom: 13.5,
+          paint: {
+            "fill-extrusion-color": "#3a3226",
+            "fill-extrusion-height": ["coalesce", ["get", "render_height"], 12],
+            "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+            "fill-extrusion-opacity": 0.85
+          }
+        });
+      }
+    }catch(e){}
+    mapReady = true;
+    renderAll();
+    if(S.businesses.length) fitToPins();
+  });
+  // pad map for topbar + sheet
+  map.setPadding ? null : null;
+}
+
+function toggle3D(){
+  is3D = !is3D;
+  $("fab3d").classList.toggle("on", is3D);
+  map.easeTo({ pitch: is3D ? 60 : 0, bearing: is3D ? -15 : 0, duration: 800 });
+}
+
+function locateMe(){
+  if(!navigator.geolocation){ alert("Geolocation not supported"); return; }
+  navigator.geolocation.getCurrentPosition(function(p){
+    userLoc = { lng: p.coords.longitude, lat: p.coords.latitude };
+    if(userMarker) userMarker.remove();
+    var el = document.createElement("div");
+    el.style.cssText = "width:18px;height:18px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 12px #3b82f6";
+    userMarker = new maplibregl.Marker({ element: el }).setLngLat([userLoc.lng, userLoc.lat]).addTo(map);
+    map.flyTo({ center: [userLoc.lng, userLoc.lat], zoom: 15, duration: 1200 });
+  }, function(){ alert("Location unavailable — allow location access and try again."); }, { enableHighAccuracy: true });
+}
+
+/* ---------- markers / list / stats ---------- */
+function bizById(id){ for(var i=0;i<S.businesses.length;i++) if(S.businesses[i].id===id) return S.businesses[i]; return null; }
+function orderedBiz(){
+  if(S.order && S.order.length){
+    var out = [];
+    S.order.forEach(function(id){ var b = bizById(id); if(b) out.push(b); });
+    return out;
+  }
+  return S.businesses.slice();
+}
+
+function renderAll(){
+  renderStats(); renderList();
+  if(mapReady) renderMarkers();
+}
+
+function renderStats(){
+  var t = S.businesses.length, bought = 0, done = 0;
+  S.businesses.forEach(function(b){ if(b.status==="bought") bought++; if(b.status==="done") done++; });
+  var visited = bought + done + S.businesses.filter(function(b){return b.status==="not";}).length;
+  var conv = visited ? Math.round(bought/visited*100) : 0;
+  $("stats").innerHTML =
+    '<span class="chip">🏪 <b>' + t + '</b></span>' +
+    '<span class="chip">✅ <b>' + bought + '</b> bought</span>' +
+    '<span class="chip">✔ <b>' + done + '</b> done</span>' +
+    '<span class="chip">📈 <b>' + conv + '%</b></span>';
+  $("sheetTitle").textContent = "Day plan (" + t + ")";
+}
+
+function renderMarkers(){
+  Object.keys(markers).forEach(function(id){ markers[id].remove(); });
+  markers = {};
+  var list = orderedBiz();
+  list.forEach(function(b, i){
+    if(b.lng == null) return;
+    var el = document.createElement("div");
+    el.className = "mk mk-" + (b.status || "todo");
+    el.textContent = (i + 1);
+    if(b.id === curId) el.classList.add("sel");
+    (function(biz, elm){
+      elm.addEventListener("click", function(e){ e.stopPropagation(); openCard(biz.id); });
+    })(b, el);
+    markers[b.id] = new maplibregl.Marker({ element: el }).setLngLat([b.lng, b.lat]).addTo(map);
+  });
+  drawRouteLine();
+}
+
+function renderList(){
+  var box = $("stopList"), list = orderedBiz();
+  if(!list.length){ box.innerHTML = '<p style="color:var(--muted);font-size:13px;padding:8px">No businesses yet — tap ＋ Import to load your 60–70 for the day.</p>'; return; }
+  box.innerHTML = "";
+  list.forEach(function(b, i){
+    var legTxt = "";
+    if(S.legs && S.legs[i]){
+      var km = S.legs[i].distance/1000, mn = Math.round(S.legs[i].duration/60);
+      legTxt = " · → " + (km < 1 ? Math.round(km*1000) + " m" : km.toFixed(1) + " km") + " · " + mn + " min";
+    }
+    var row = document.createElement("div");
+    row.className = "stop";
+    row.innerHTML =
+      '<div class="n">' + (i+1) + '</div>' +
+      '<div class="inf"><div class="nm">' + esc(b.name) + '</div>' +
+      '<div class="mt">' + esc(b.addr || "") + legTxt + (b.note ? " · 📝 " + esc(b.note) : "") + '</div></div>' +
+      '<div class="st st-' + (b.status||"todo") + '"></div>' +
+      '<a class="nav" href="https://www.google.com/maps/dir/?api=1&destination=' + b.lat + ',' + b.lng + '" target="_blank" onclick="event.stopPropagation()">↗</a>';
+    (function(biz){
+      row.addEventListener("click", function(){
+        if(biz.lng != null) map.flyTo({ center: [biz.lng, biz.lat], zoom: 16, duration: 900 });
+        openCard(biz.id);
+      });
+    })(b);
+    box.appendChild(row);
+  });
+  $("sheetMeta").textContent = S.routeMeta
+    ? ("≈ " + (S.routeMeta.distance/1000).toFixed(1) + " km · " + Math.round(S.routeMeta.duration/60) + " min ▾")
+    : "tap to expand ▾";
+}
+
+function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+function fitToPins(){
+  var pts = S.businesses.filter(function(b){ return b.lng != null; });
+  if(!pts.length || !mapReady) return;
+  var b = new maplibregl.LngLatBounds();
+  pts.forEach(function(p){ b.extend([p.lng, p.lat]); });
+  map.fitBounds(b, { padding: { top: 110, bottom: 220, left: 40, right: 40 }, duration: 1000 });
+}
+
+/* ---------- route ---------- */
+function hav(a, b){
+  var R = 6371, dLa = (b.lat-a.lat)*Math.PI/180, dLo = (b.lng-a.lng)*Math.PI/180;
+  var s = Math.sin(dLa/2)*Math.sin(dLa/2) + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLo/2)*Math.sin(dLo/2);
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+
+function optimizeOrder(pts, start){
+  var n = pts.length, used = new Array(n).fill(false), order = [];
+  var cur = start || pts[0], startIdx = -1;
+  if(!start){ order.push(0); used[0] = true; cur = pts[0]; }
+  while(order.length < n){
+    var best = -1, bd = 1e18;
+    for(var i=0;i<n;i++){ if(used[i]) continue; var d = hav(cur, pts[i]); if(d < bd){ bd = d; best = i; } }
+    used[best] = true; order.push(best); cur = pts[best];
+  }
+  // 2-opt polish
+  var improved = true, guard = 0;
+  function segLen(o){
+    var L = 0, prev = start || pts[o[0]];
+    for(var k=(start?0:1); k<o.length; k++){ L += hav(prev, pts[o[k]]); prev = pts[o[k]]; }
+    return L;
+  }
+  while(improved && guard++ < 8){
+    improved = false;
+    var base = segLen(order);
+    for(var i=0;i<n-1 && !improved;i++) for(var j=i+1;j<n && !improved;j++){
+      var c = order.slice(); var seg = c.slice(i, j+1).reverse();
+      for(var k=0;k<seg.length;k++) c[i+k] = seg[k];
+      if(segLen(c) < base - 1e-9){ order = c; improved = true; }
+    }
+  }
+  return order;
+}
+
+async function fetchRoute(pts){
+  var c = pts.map(function(p){ return p.lng.toFixed(5) + "," + p.lat.toFixed(5); }).join(";");
+  var r = await fetch("https://router.project-osrm.org/route/v1/driving/" + c + "?overview=full&geometries=geojson");
+  var d = await r.json();
+  if(d.code !== "Ok" || !d.routes || !d.routes.length) throw new Error("route failed");
+  return d.routes[0];
+}
+
+function drawRouteLine(){
+  if(!mapReady) return;
+  var src = map.getSource("route");
+  var data = S.routeGeom
+    ? { type: "Feature", properties: {}, geometry: S.routeGeom }
+    : { type: "FeatureCollection", features: [] };
+  if(src){ src.setData(data); return; }
+  map.addSource("route", { type: "geojson", data: data });
+  map.addLayer({ id: "route-line", type: "line", source: "route",
+    paint: { "line-color": "#d8a94e", "line-width": 5, "line-opacity": 0.9 } });
+}
+
+async function optimize(){
+  var pts = S.businesses.filter(function(b){ return b.lng != null; });
+  if(pts.length < 2){ alert("Add at least 2 located businesses first."); return; }
+  $("sheetMeta").textContent = "optimizing…";
+  try{
+    var start = userLoc ? { lng: userLoc.lng, lat: userLoc.lat } : null;
+    var idx = optimizeOrder(pts, start);
+    S.order = idx.map(function(i){ return pts[i].id; });
+    var ordered = idx.map(function(i){ return pts[i]; });
+    var coords = start ? [start].concat(ordered) : ordered;
+    try{
+      var r = await fetchRoute(coords);
+      S.routeGeom = r.geometry;
+      S.routeMeta = { distance: r.distance, duration: r.duration };
+      // align legs to businesses (skip start leg if present)
+      S.legs = start ? r.legs.slice(1) : r.legs.slice(1);
+      // NOTE: legs[i] = leg arriving at business i would need legs[i+?]; we store inbound legs:
+      S.legs = [];
+      for(var k=0;k<ordered.length;k++){ S.legs.push(r.legs[k + (start?1:0)] || null); }
+    }catch(e){
+      // fallback: straight-line geometry, no leg info
+      S.routeGeom = { type: "LineString", coordinates: coords.map(function(p){ return [p.lng, p.lat]; }) };
+      S.routeMeta = null; S.legs = null;
+    }
+    save(); renderAll(); fitToPins();
+  }catch(e){ $("sheetMeta").textContent = "tap to expand ▾"; alert("Optimization failed — try again."); }
+}
+
+function navigateTo(){
+  var b = bizById(curId); if(!b || b.lat == null) return;
+  window.open("https://www.google.com/maps/dir/?api=1&destination=" + b.lat + "," + b.lng, "_blank");
+}
+
+/* ---------- business card ---------- */
+function openCard(id){
+  curId = id;
+  var b = bizById(id); if(!b) return;
+  $("bcName").textContent = b.name;
+  $("bcAddr").textContent = b.addr || (b.lat != null ? b.lat.toFixed(4) + ", " + b.lng.toFixed(4) : "");
+  $("bcNote").value = b.note || "";
+  paintStatusBtns(b.status);
+  $("bizcard").classList.remove("hidden");
+  if(mapReady) renderMarkers();
+  if(b.lng != null) map.flyTo({ center: [b.lng, b.lat], zoom: 16, duration: 900 });
+}
+function closeCard(){ curId = null; $("bizcard").classList.add("hidden"); if(mapReady) renderMarkers(); }
+function paintStatusBtns(st){
+  var btns = document.querySelectorAll(".sbtn");
+  for(var i=0;i<btns.length;i++){
+    var s = btns[i].getAttribute("data-s");
+    btns[i].className = "sbtn" + (s === st ? " on-" + s : "");
+  }
+}
+function setStatus(st){
+  var b = bizById(curId); if(!b) return;
+  b.status = st; paintStatusBtns(st); save(); renderAll();
+}
+function saveNote(){
+  var b = bizById(curId); if(!b) return;
+  b.note = $("bcNote").value.trim(); save(); renderList(); closeCard();
+}
+
+/* ---------- import / export ---------- */
+function openModal(){ $("modal").classList.remove("hidden"); }
+function closeModal(){ $("modal").classList.add("hidden"); $("prog").textContent = ""; }
+
+function parseLines(text){
+  return text.split("\n").map(function(l){ return l.trim(); }).filter(function(l){ return l && l.charAt(0) !== "#"; })
+    .map(function(line){
+      var parts = line.split(",").map(function(s){ return s.trim(); });
+      var name = parts[0] || "Unnamed";
+      var m = (parts[1] || "").match(/(-?\d+(?:\.\d+)?)\s*[,\s;]\s*(-?\d+(?:\.\d+)?)/);
+      var lat = null, lng = null, addr = "";
+      if(m){
+        var a = parseFloat(m[1]), b2 = parseFloat(m[2]);
+        if(Math.abs(a) > 90){ lng = a; lat = b2; } else { lat = a; lng = b2; }
+        addr = parts.slice(2).join(", ");
+      } else {
+        addr = parts.slice(1).join(", ");
+      }
+      return { name: name, addr: addr, lat: lat, lng: lng };
+    });
+}
+
+function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+async function geocode(addr, city){
+  var q = encodeURIComponent(addr + ", " + city + ", India");
+  var r = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=in&q=" + q, {
+    headers: { "Accept": "application/json" }
+  });
+  var d = await r.json();
+  if(d && d.length) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) };
+  return null;
+}
+
+async function doImport(){
+  var text = $("impText").value;
+  var city = $("impCity").value.trim() || "Mumbai";
+  S.city = city;
+  var items = parseLines(text);
+  if(!items.length){ $("prog").textContent = "Paste at least one line first."; return; }
+  var added = 0, failed = [];
+  for(var i=0;i<items.length;i++){
+    var it = items[i];
+    $("prog").textContent = "Locating " + (i+1) + " / " + items.length + "… " + it.name;
+    var ll = (it.lat != null) ? { lat: it.lat, lng: it.lng } : null;
+    if(!ll){
+      try{ ll = await geocode(it.addr || it.name, city); }catch(e){ ll = null; }
+      await sleep(1100); // Nominatim usage policy: max 1 req/sec
+    }
+    if(ll){
+      S.businesses.push({ id: uid(), name: it.name, addr: it.addr, lat: ll.lat, lng: ll.lng, status: "todo", note: "" });
+      added++;
+    } else failed.push(it.name);
+  }
+  S.order = []; S.legs = null; S.routeGeom = null; S.routeMeta = null;
+  save(); renderAll(); fitToPins(); closeModal(); $("impText").value = "";
+  alert("Added " + added + " businesses." + (failed.length ? "\nCould not locate: " + failed.join(", ") : "") + "\n\nTap ⚡ to optimize your route.");
+}
+
+function loadDemo(){
+  var demo = [
+    ["Carter's Café", 19.0652, 72.8221, "Carter Road"],
+    ["Salon Aura", 19.0598, 72.8296, "Waterfield Road"],
+    ["Bandra Bakehouse", 19.0634, 72.8268, "Chapel Road"],
+    ["FitZone Gym", 19.0557, 72.8319, "SV Road"],
+    ["Cafe Basilico", 19.0608, 72.8243, "Hill Road"],
+    ["Glamour Nails", 19.0671, 72.8302, "Waroda Road"],
+    ["The Daily Grind", 19.0529, 72.8262, "Linking Road"],
+    ["Petals Florist", 19.0621, 72.8331, "Turner Road"]
+  ];
+  demo.forEach(function(d){
+    S.businesses.push({ id: uid(), name: d[0], addr: d[3] + ", Bandra West", lat: d[1], lng: d[2], status: "todo", note: "" });
+  });
+  S.order = []; S.legs = null; S.routeGeom = null; S.routeMeta = null;
+  save(); renderAll(); fitToPins(); closeModal();
+  alert(demo.length + " demo businesses added around Bandra. Tap ⚡ to optimize.");
+}
+
+function exportJSON(){
+  var blob = new Blob([JSON.stringify(S, null, 2)], { type: "application/json" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "pitch-map-backup-" + new Date().toISOString().slice(0,10) + ".json";
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+}
+
+function importFile(){ $("filePick").click(); }
+$("filePick").addEventListener("change", function(){
+  var f = $("filePick").files[0]; if(!f) return;
+  var rd = new FileReader();
+  rd.onload = function(){
+    try{
+      var txt = rd.result;
+      if(f.name.match(/\.json$/i)){
+        var d = JSON.parse(txt);
+        if(d && d.businesses){ S = d; if($("impCity")) $("impCity").value = S.city || "Mumbai"; }
+        else throw new Error("bad file");
+      } else {
+        parseLines(txt).forEach(function(it){
+          S.businesses.push({ id: uid(), name: it.name, addr: it.addr, lat: it.lat, lng: it.lng, status: "todo", note: "" });
+        });
+      }
+      S.order = []; S.legs = null; S.routeGeom = null; S.routeMeta = null;
+      save(); renderAll(); fitToPins(); closeModal();
+      alert("Imported ✓");
+    }catch(e){ alert("Could not read that file."); }
+  };
+  rd.readAsText(f);
+  $("filePick").value = "";
+});
+
+function resetDay(){
+  if(!confirm("Reset all statuses to 'To visit'? Businesses and notes stay.")) return;
+  S.businesses.forEach(function(b){ b.status = "todo"; });
+  save(); renderAll(); closeModal();
+}
+function clearAll(){
+  if(!confirm("Delete ALL businesses? This cannot be undone. Export a backup first!")) return;
+  S = { city: S.city, businesses: [], order: [], legs: null, routeGeom: null, routeMeta: null };
+  save(); renderAll(); closeModal();
+}
+
+/* ---------- boot ---------- */
+load();
+initMap();
+window.addEventListener("DOMContentLoaded", function(){ renderStats(); renderList(); });
+</script>
+</body>
+</html>

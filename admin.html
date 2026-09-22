@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFC Review Tool — Admin</title>
+<meta name="robots" content="noindex,nofollow">
+<style>
+:root{--brand:#d8a94e;--bg:#0d0b08;--card:rgba(255,255,255,.045);--text:#f5efe4;--muted:#a89f8d}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
+.wrap{max-width:640px;margin:0 auto;padding:24px 16px 60px}
+h1{font-size:24px;margin:0 0 20px}
+h2{font-size:18px;margin:0 0 14px}
+h3{font-size:15px;margin:20px 0 10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:20px;margin-bottom:18px}
+label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+label:first-child{margin-top:0}
+input[type=text],input[type=password],textarea,select{
+  width:100%;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);
+  border-radius:12px;color:var(--text);padding:12px;font-size:15px;font-family:inherit;
+}
+input[type=color]{width:64px;height:44px;padding:4px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);border-radius:12px}
+textarea{resize:vertical}
+.btn{background:linear-gradient(135deg,var(--brand),#b57f2a);color:#1a1206;border:0;border-radius:14px;
+  padding:14px 18px;font-size:16px;font-weight:700;cursor:pointer;margin-top:16px;width:100%}
+.btn:active{transform:scale(.98)}
+.btn.ghost{background:rgba(255,255,255,.06);color:var(--text);border:1px solid rgba(255,255,255,.1);box-shadow:none}
+.btn.small{width:auto;padding:10px 16px;font-size:14px;margin-top:10px}
+.qrow{background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:12px;margin-bottom:10px;display:grid;gap:8px}
+.qrow .row2{display:grid;grid-template-columns:1fr 1fr auto;gap:8px}
+.danger{background:rgba(255,80,80,.12);color:#ff9a9a;border:1px solid rgba(255,80,80,.3);border-radius:10px;padding:0 12px;cursor:pointer}
+.hidden{display:none!important}
+.result{margin-top:14px;padding:14px;border-radius:12px;font-size:14px;line-height:1.5;word-break:break-all}
+.result.ok{background:rgba(90,200,120,.1);border:1px solid rgba(90,200,120,.3)}
+.result.err{background:rgba(255,80,80,.08);border:1px solid rgba(255,80,80,.3)}
+.client{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.client:last-child{border-bottom:0}
+.client .nm{font-weight:600}
+.client .id{color:var(--muted);font-size:13px}
+.client .link{font-size:13px;color:var(--brand);word-break:break-all}
+.mini{background:rgba(255,255,255,.07);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:8px 12px;font-size:13px;cursor:pointer;margin-right:6px}
+.note{font-size:13px;color:var(--muted);line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚙️ NFC Review Admin</h1>
+  <p class="note">Private control panel. Add a client business here, then program the generated link onto their NFC card.</p>
+
+  <div class="card" style="border-color:rgba(216,169,78,.45)">
+    <h2>🗺 Sales Map</h2>
+    <p class="note">Your daily pitch command center — 3D map of Mumbai, optimized visiting route, per-business status (bought / not bought / done) and 1-line notes.</p>
+    <a href="sales-map.html" class="btn" style="display:block;text-align:center;text-decoration:none">Open Sales Map →</a>
+  </div>
+
+  <div class="card">
+    <h2>Connection</h2>
+    <label>Worker URL</label>
+    <input type="text" id="workerUrl" placeholder="https://nfc-review.yourname.workers.dev">
+    <label>Admin password</label>
+    <input type="password" id="adminKey" placeholder="Your ADMIN_PASSWORD secret">
+    <button class="btn ghost" onclick="loadClients()">Connect &amp; load clients</button>
+  </div>
+
+  <div class="card">
+    <h2>Add / update business</h2>
+    <label>Business ID — lowercase slug, e.g. cafe-mocha</label>
+    <input type="text" id="f_id" placeholder="cafe-mocha" autocapitalize="off" spellcheck="false">
+    <label>Business name</label>
+    <input type="text" id="f_name" placeholder="Cafe Mocha">
+    <label>Brand color</label>
+    <input type="color" id="f_color" value="#d8a94e">
+    <label>Welcome text</label>
+    <textarea id="f_welcome" rows="2" placeholder="Thanks for visiting! Tap through — it takes 30 seconds."></textarea>
+    <label>Google review link — the customer's "Write a review" page</label>
+    <input type="text" id="f_link" placeholder="https://www.google.com/maps/… or https://g.page/…/review" autocapitalize="off" spellcheck="false">
+    <h3>Questions</h3>
+    <div id="qlist"></div>
+    <button class="btn ghost" onclick="addQ()">+ Add question</button>
+    <button class="btn" onclick="saveBiz()">💾 Save business</button>
+    <div id="saveResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>Clients</h2>
+    <button class="btn ghost small" onclick="loadClients()">↻ Refresh</button>
+    <div id="clients" style="margin-top:8px"><p class="note">Connect above to see clients.</p></div>
+  </div>
+</div>
+
+<script>
+/* Paste your deployed Worker URL here too (or type it in the box above). */
+const WORKER_URL = "PASTE_YOUR_WORKER_URL_HERE";
+
+var questions = [];
+
+function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+
+function addQ(text, type, options){
+  questions.push({ text: text || "", type: type || "rating", options: options || "" });
+  renderQ();
+}
+
+function renderQ(){
+  var box = document.getElementById("qlist");
+  box.innerHTML = "";
+  questions.forEach(function(q, i){
+    var div = document.createElement("div");
+    div.className = "qrow";
+    div.innerHTML =
+      '<input type="text" placeholder="Question text" value="' + esc(q.text) + '" data-i="' + i + '" data-k="text">' +
+      '<div class="row2">' +
+        '<select data-i="' + i + '" data-k="type">' +
+          '<option value="rating"' + (q.type === "rating" ? " selected" : "") + '>Emoji rating (1–5)</option>' +
+          '<option value="chips"' + (q.type === "chips" ? " selected" : "") + '>Chips — pick one</option>' +
+          '<option value="chipsmulti"' + (q.type === "chipsmulti" ? " selected" : "") + '>Chips — pick many</option>' +
+        '</select>' +
+        '<input type="text" placeholder="Options, comma separated" value="' + esc(q.options) + '" data-i="' + i + '" data-k="options"' + (q.type === "rating" ? ' class="hidden"' : "") + '>' +
+        '<button class="danger" data-del="' + i + '">✕</button>' +
+      '</div>';
+    box.appendChild(div);
+  });
+  var els = box.querySelectorAll("input,select");
+  for(var j = 0; j < els.length; j++){
+    (function(el){
+      var h = function(){ questions[+el.dataset.i][el.dataset.k] = el.value; if(el.dataset.k === "type") renderQ(); };
+      el.addEventListener("input", h);
+      el.addEventListener("change", h);
+    })(els[j]);
+  }
+  var dels = box.querySelectorAll("[data-del]");
+  for(var k = 0; k < dels.length; k++){
+    (function(b){ b.addEventListener("click", function(){ questions.splice(+b.dataset.del, 1); renderQ(); }); })(dels[k]);
+  }
+}
+
+function creds(){
+  var w = document.getElementById("workerUrl").value.trim() || WORKER_URL;
+  var k = document.getElementById("adminKey").value;
+  if(w.slice(-1) === "/") w = w.slice(0, -1);
+  return { w: w, k: k };
+}
+
+function baseLink(){
+  return location.href.replace(/admin\.html.*$/, "");
+}
+
+function okMsg(html){
+  var r = document.getElementById("saveResult");
+  r.className = "result ok";
+  r.innerHTML = html;
+}
+function errMsg(t){
+  var r = document.getElementById("saveResult");
+  r.className = "result err";
+  r.textContent = t;
+}
+
+async function saveBiz(){
+  var c = creds();
+  if(c.w.indexOf("PASTE_") === 0){ errMsg("Set your Worker URL first."); return; }
+  if(!c.k){ errMsg("Enter your admin password."); return; }
+
+  var id = document.getElementById("f_id").value.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
+  if(!id){ errMsg("Business ID is required."); return; }
+
+  var qs = questions
+    .filter(function(q){ return q.text.trim(); })
+    .map(function(q, i){
+      var o = { id: "q" + (i + 1), text: q.text.trim(), type: q.type === "chipsmulti" ? "chips" : q.type };
+      if(q.type !== "rating"){
+        o.multi = (q.type === "chipsmulti");
+        o.options = q.options.split(",").map(function(s){ return s.trim(); }).filter(Boolean);
+        if(!o.options.length){ o.options = ["Good", "Okay"]; }
+      }
+      return o;
+    });
+  if(!qs.length){ errMsg("Add at least one question."); return; }
+
+  var config = {
+    name: document.getElementById("f_name").value.trim() || id,
+    color: document.getElementById("f_color").value,
+    welcome: document.getElementById("f_welcome").value.trim(),
+    google_link: document.getElementById("f_link").value.trim(),
+    questions: qs
+  };
+
+  try{
+    var r = await fetch(c.w + "/admin/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Key": c.k },
+      body: JSON.stringify({ id: id, config: config })
+    });
+    var d = await r.json();
+    if(d.ok){
+      var link = baseLink() + "?biz=" + id;
+      okMsg("Saved ✓<br><br><b>NFC link (program this onto the card):</b><br>" + esc(link) +
+        '<br><br><button class="mini" onclick="navigator.clipboard.writeText(\'' + link + '\')">Copy link</button>' +
+        '<a class="mini" style="text-decoration:none" href="' + esc(link) + '" target="_blank">Test it →</a>');
+      loadClients();
+    } else {
+      errMsg("Error: " + (d.error || r.status));
+    }
+  }catch(e){ errMsg("Network error — check the Worker URL."); }
+}
+
+async function loadClients(){
+  var c = creds();
+  var box = document.getElementById("clients");
+  if(c.w.indexOf("PASTE_") === 0){ box.innerHTML = '<p class="note">Set your Worker URL first.</p>'; return; }
+  if(!c.k){ box.innerHTML = '<p class="note">Enter your admin password first.</p>'; return; }
+  box.innerHTML = '<p class="note">Loading…</p>';
+  try{
+    var r = await fetch(c.w + "/admin/list", { headers: { "X-Admin-Key": c.k } });
+    var d = await r.json();
+    if(d.error){ box.innerHTML = '<p class="note">Error: ' + esc(d.error) + '</p>'; return; }
+    if(!d.businesses.length){ box.innerHTML = '<p class="note">No clients yet. Add your first business above.</p>'; return; }
+    box.innerHTML = "";
+    d.businesses.forEach(function(b){
+      var link = baseLink() + "?biz=" + b.id;
+      var div = document.createElement("div");
+      div.className = "client";
+      div.innerHTML =
+        '<div><div class="nm">' + esc(b.name) + '</div><div class="id">id: ' + esc(b.id) + '</div>' +
+        '<div class="link">' + esc(link) + '</div></div>' +
+        '<div style="white-space:nowrap">' +
+          '<button class="mini" data-copy="' + esc(link) + '">Copy</button>' +
+          '<button class="mini" data-del="' + esc(b.id) + '" style="color:#ff9a9a">Delete</button>' +
+        '</div>';
+      box.appendChild(div);
+    });
+    var cps = box.querySelectorAll("[data-copy]");
+    for(var i = 0; i < cps.length; i++){
+      (function(btn){ btn.addEventListener("click", function(){ navigator.clipboard.writeText(btn.dataset.copy); btn.textContent = "Copied ✓"; }); })(cps[i]);
+    }
+    var dels = box.querySelectorAll("[data-del]");
+    for(var j = 0; j < dels.length; j++){
+      (function(btn){
+        btn.addEventListener("click", async function(){
+          if(!confirm("Delete '" + btn.dataset.del + "'? This cannot be undone.")) return;
+          await fetch(creds().w + "/admin/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Admin-Key": creds().k },
+            body: JSON.stringify({ id: btn.dataset.del })
+          });
+          loadClients();
+        });
+      })(dels[j]);
+    }
+  }catch(e){ box.innerHTML = '<p class="note">Network error — check the Worker URL.</p>'; }
+}
+
+// starter questions so the form is never empty
+addQ("How was the food & overall experience?", "rating", "");
+addQ("How was the service?", "rating", "");
+addQ("What did you love most?", "chipsmulti", "Taste, Ambience, Service, Value for money, Hygiene");
+if(WORKER_URL.indexOf("PASTE_") !== 0){ document.getElementById("workerUrl").value = WORKER_URL; }
+</script>
+</body>
+</html>
