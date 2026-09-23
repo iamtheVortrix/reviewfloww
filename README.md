@@ -1,97 +1,36 @@
-# NFC Review Tool — go-live guide
+# VORTRIX — NFC Tap-to-Review System v2
 
-A multi-tenant tap-to-review system for local businesses. Customer taps an NFC
-card → answers 4–6 quick questions → gets an AI-drafted Google review → copies it
-and posts from their own Google account. You sell the setup to businesses for
-₹2,000–3,000 + optional ₹300–500/month.
+Two sides, two pages. Deploy the whole folder to GitHub Pages (or any static host).
 
-## Files in this folder
+## YOUR SIDE — `index.html` (the admin tool, mobile-first)
 
-| File | What it is | Where it goes |
-|---|---|---|
-| `index.html` | Customer-facing review experience | GitHub Pages |
-| `admin.html` | Your private client-onboarding panel | GitHub Pages |
-| `sales-map.html` | **V1** Sales Map — 3D pitch route command center | GitHub Pages |
-| `template-generator.js` | Offline fallback review writer | GitHub Pages |
-| `manifest.json`, `sw.js`, `icon.svg` | PWA shell (Add to Home Screen, caching) | GitHub Pages |
-| `worker.js` | Backend: config storage, AI generation, admin API | Cloudflare Workers |
-| `wrangler.toml` | Optional — only if deploying via Wrangler CLI | — |
+Open this on your phone. Bottom nav: **Home · Clients · Cards · Map**.
 
-## Step-by-step: go live
+- **Home** — stats (clients, cards issued, pitched, bought, conversion %, monthly recurring), tap-system connection (Worker URL + admin password), backup export/import.
+- **Clients** — add/edit clients (name, category, phone, address, Google review link, monthly fee). Call / WhatsApp straight from the card. **Publish** pushes the client's review page live to your Cloudflare Worker. The link button copies the tap link to program on the NFC card.
+- **Cards** — NFC card inventory: code (VRTX-001…), assigned client, status (in stock / issued / lost). Copy the tap link per card when programming it.
+- **Map** — Mumbai split into 9 pitch zones (South Mumbai, Bandra·Khar, Andheri West, Powai·Andheri East, Dadar·Central, Ghatkopar·Vikhroli, Malad·Borivali, Thane·Mulund, Navi Mumbai). Flow per zone:
+  1. Open the zone → **Research businesses** — pulls real restaurants, cafes, salons, clinics, gyms, hotels & shops from OpenStreetMap around the zone. Tick the ones worth pitching (aim 50–70) → Add.
+  2. **Build route order** — uses your GPS as the start, optimizes the stop order (real road distances via OSRM, 2-opt) → stops numbered 1, 2, 3…
+  3. Work the route: per stop → Pitched / Bought / No + 1-line note, navigate button opens Google Maps to that stop. The Maps button opens the next 9 unvisited stops as one Google Maps route.
+  4. Progress bar + stats feed back to Home.
 
-### A. Deploy the backend (Cloudflare, free)
+All admin data lives in your browser's localStorage — use **Export** on Home for backups.
 
-1. Go to [dash.cloudflare.com](https://dash.cloudflare.com) → sign up / log in (free).
-2. **Workers & Pages → Create → Create Worker** → name it e.g. `nfc-review` → **Deploy**.
-3. Click **Edit code** → delete everything → paste the full contents of `worker.js` → **Save and deploy**.
-4. **Create the KV namespace:** in the left sidebar go to **Storage & Databases → KV** → **Create a namespace** → name it `BUSINESS_CONFIGS` → note its ID.
-5. **Bind KV to the Worker:** open your Worker → **Settings → Bindings → Add** → **KV namespace** → variable name `BUSINESS_CONFIGS` → select the namespace you just made → **Deploy** the worker again.
-6. **Set the secrets:** in the Worker → **Settings → Variables and Secrets** → add two secrets:
-   - `GROQ_API_KEY` → your Groq API key
-   - `ADMIN_PASSWORD` → pick a strong password (this protects your admin panel)
-7. Copy your Worker's public URL — it looks like `https://nfc-review.yourname.workers.dev`.
+## CUSTOMER SIDE — `tap.html` (NFC tap page)
 
-### B. Point the frontend at the backend
+This is what opens when a customer taps a programmed NFC card. You never need to open it yourself. It reads `?biz=<client-slug>` → loads the business config from your Cloudflare Worker → 4 quick questions → AI-drafted review → copy & open Google reviews.
 
-8. Open `index.html` and `admin.html` in a text editor. Find this line near the top of the script:
-   `const WORKER_URL = "PASTE_YOUR_WORKER_URL_HERE";`
-   Replace the placeholder with your Worker URL from step 7 (in **both** files).
+## Backend — `worker.js`
 
-### C. Host the frontend (GitHub Pages, free)
+Cloudflare Worker (unchanged from v1): serves business configs from KV, generates reviews via Groq with offline fallback. Deploy per the old instructions, bind KV `BUSINESS_CONFIGS`, set secrets `GROQ_API_KEY` + `ADMIN_PASSWORD`, then paste the Worker URL into the admin app on Home.
 
-9. Create a new **public** GitHub repository, e.g. `nfc-review-tool`.
-10. Upload **all files** from this folder to the repo root (`index.html`, `admin.html`,
-    `template-generator.js`, `manifest.json`, `sw.js`, `icon.svg`).
-11. Repo **Settings → Pages** → Source: **Deploy from a branch** → branch `main`, folder `/ (root)` → Save.
-12. Wait ~1 minute. Your site is live at `https://YOUR-USERNAME.github.io/nfc-review-tool/`.
+## Files
 
-### D. Add your first client and test
-
-13. Open `https://YOUR-USERNAME.github.io/nfc-review-tool/admin.html`.
-14. Enter the Worker URL + your admin password → add a test business (name, color,
-    Google review link, questions) → Save.
-15. Copy the generated NFC link (e.g. `…?biz=cafe-mocha`) and open it **on your phone**.
-    Walk the full flow: questions → AI draft → Copy & open Google reviews.
-16. Tip: opening `index.html` with **no** `?biz=` shows a built-in demo business, so you
-    can preview the design anytime without touching the backend.
-
-### E. Program the NFC cards
-
-17. Use the free **NFC Tools** app (Android/iOS) → Write → Add a record → **URL** →
-    paste the client's link → Write the tag. Stick it at the client's counter.
-
-## Selling notes (India)
-
-- **Cost per client:** ~₹500–800 (physical NFC cards + printing). Everything digital is free tier.
-- **Price:** ₹2,000–3,000 one-time setup + optional ₹300–500/month for the "AI review dashboard".
-- **Pitch line:** "Customers tap a card, answer 4 questions in 30 seconds, and post a Google review — most businesses 3–5x their review count in the first month."
-- Google does not allow auto-posting reviews, which is why the customer always taps "Post"
-  themselves — this keeps the client's listing safe and the system compliant.
-
-## Sales Map — daily pitch command center (`sales-map.html`)
-
-Your own tool for selling the cards, living at the same GitHub Pages link
-(`…/sales-map.html`, linked from the top of `admin.html`).
-
-**V1 — shipped now:**
-- Real 3D map (MapLibre GL + OpenFreeMap, extruded buildings, 3D/2D toggle) — free, no API key
-- Import 60–70 businesses/day: paste `name, address` (auto-located) or `name, lat, lng`
-- ⚡ **Optimize route** — nearest-neighbor + 2-opt ordering, real road route drawn via OSRM,
-  per-stop distance/time, total km + minutes for the day
-- Tap any pin → status: 🕐 To visit / ✅ Bought / ❌ Not bought / ✔ Done + 1-line note
-- Ordered day-plan list, per-stop Google Maps "Navigate ↗" deep link, live stats
-  (businesses · bought · done · conversion %), 🎯 my-location start point
-- Everything saved in the browser (localStorage) + JSON backup export/import. One link, no login.
-
-**V2 — next:** live GPS follow mode while walking, turn-by-turn list from OSRM steps,
-WhatsApp follow-up message templates per business, multi-day history & streaks.
-
-**V3 — later:** auto-discover new businesses nearby (Overpass API: cafes/salons within
-radius), revenue dashboard (cards sold × price), team mode with shared lists.
-
-## Maintenance
-
-- Adding a client = 2 minutes in `admin.html`. No code changes, ever.
-- If Groq ever fails (rate limit/outage), the system silently falls back to the offline
-  template generator — the customer never sees an error.
-- After changing frontend files, bump the `CACHE` name in `sw.js` so phones pick up the update.
+| File | What |
+|---|---|
+| `index.html` + `app.js` | Your admin tool (open this) |
+| `tap.html` + `template-generator.js` | Customer tap page (NFC cards point here) |
+| `worker.js` + `wrangler.toml` | Cloudflare backend |
+| `manifest.json`, `icon.svg`, `sw.js` | PWA bits for the tap page |
+| `_legacy/` | Old v1 admin + sales map (superseded, not deployed) |
