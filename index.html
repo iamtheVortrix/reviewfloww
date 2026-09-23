@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#0d0b08">
 <link rel="icon" href="icon.svg">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <style>
 :root{
   --brand:#d8a94e; --brand2:#f3d08a;
@@ -160,6 +161,21 @@ h2.sec:first-child{margin-top:4px}
 .empty{text-align:center;color:var(--muted);padding:34px 20px;font-size:14px;line-height:1.6}
 .kv{font-family:ui-monospace,monospace;font-size:12px;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;word-break:break-all;color:var(--brand2)}
 .hintline{color:var(--muted);font-size:13px;line-height:1.55;margin:8px 2px}
+
+/* sectors tab */
+.pill.t1{background:rgba(216,169,78,.14);color:var(--brand2);border-color:rgba(216,169,78,.3)}
+.pill.t2{background:rgba(96,165,250,.12);color:var(--blue);border-color:rgba(96,165,250,.3)}
+.pill.t3{background:rgba(168,159,141,.12);color:var(--muted);border-color:var(--line)}
+#sectorview{display:none;position:fixed;inset:0;z-index:80;background:var(--bg);overflow-y:auto;padding-bottom:40px}
+#sectorview.open{display:block}
+#secmap{height:320px;width:100%;z-index:1}
+.maplibregl-canvas{display:block}
+.ml-num{
+  width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:800;background:linear-gradient(135deg,var(--brand),#b57f2a);
+  color:#1a1206;border:2px solid #0d0b08;box-shadow:0 2px 8px rgba(0,0,0,.5);cursor:pointer;
+}
+.ml-num.dim{background:#3a3226;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -231,6 +247,14 @@ h2.sec:first-child{margin-top:4px}
       <p class="hintline">Pick a zone → research 50–70 businesses → the system orders them into a pitch route: stop 1, then 2, then 3…</p>
       <div id="zone-list"></div>
     </section>
+
+    <!-- SECTORS -->
+    <section id="tab-sectors" class="tab">
+      <h2 class="sec">100 sector pitch map</h2>
+      <p class="hintline">Tap a sector → find real businesses on live OSM data → build an ordered 3D pitch route. One sector = one pitch day.</p>
+      <input class="search" id="sector-search" placeholder="🔍 Search sectors…" oninput="renderSectors()">
+      <div id="sector-list"></div>
+    </section>
   </main>
 
   <nav id="bottomnav">
@@ -238,6 +262,7 @@ h2.sec:first-child{margin-top:4px}
     <button data-tab="clients" onclick="switchTab('clients')"><span class="ic">👥</span>Clients</button>
     <button data-tab="cards" onclick="switchTab('cards')"><span class="ic">💳</span>Cards</button>
     <button data-tab="map" onclick="switchTab('map')"><span class="ic">🗺</span>Map</button>
+    <button data-tab="sectors" onclick="switchTab('sectors')"><span class="ic">📌</span>Sectors</button>
   </nav>
 </div>
 
@@ -254,6 +279,7 @@ h2.sec:first-child{margin-top:4px}
       <div class="prog"><div id="zv-progress" style="width:0%"></div></div>
       <div class="btnrow">
         <button class="btn" onclick="researchZone()">🔍 Research businesses</button>
+        <button class="btn" id="sector-load-btn" style="display:none" onclick="loadSectorStops()">📥 Load S001 sector list</button>
       </div>
       <div class="btnrow">
         <button class="btn ghost" onclick="buildRoute()">🧭 Build route order</button>
@@ -265,10 +291,43 @@ h2.sec:first-child{margin-top:4px}
   </div>
 </div>
 
+<!-- SECTOR DETAIL -->
+<div id="sectorview">
+  <div class="zv-head">
+    <button class="iconbtn" onclick="closeSector()">←</button>
+    <div class="grow"><div class="name" id="sec-name"></div><div class="sub2" id="sec-sub"></div></div>
+    <span id="sec-tier"></span>
+  </div>
+  <div id="secmap"></div>
+  <div class="zv-body">
+    <div class="card">
+      <div class="row"><div class="grow"><b>Pitch route</b><div class="sub2" id="sec-progress-label"></div></div></div>
+      <div class="prog"><div id="sec-progress" style="width:0%"></div></div>
+      <p class="hintline">🔍 <b>Find businesses</b> pulls <b>live OSM data</b> (no review counts — OSM doesn't have them; coverage varies by area).</p>
+      <div class="btnrow">
+        <button class="btn" onclick="sectorResearch()">🔍 Find businesses</button>
+        <button class="btn ghost" id="sec-curated-btn" style="display:none" onclick="sectorLoadCurated()">📂 Load curated list</button>
+      </div>
+      <div class="btnrow">
+        <button class="btn ghost" onclick="sectorWidenSearch()">🌐 Widen search</button>
+        <button class="btn ghost" onclick="sectorAddManual()">➕ Add manually</button>
+      </div>
+      <div class="btnrow">
+        <button class="btn ghost" onclick="sectorBuildRoute()">🧭 Build route order</button>
+        <button class="btn ghost" onclick="sectorOpenMapsChunk()">📍 Maps</button>
+      </div>
+    </div>
+    <h2 class="sec">Stops <span id="sec-count" style="color:var(--brand)"></span></h2>
+    <div id="sec-list"></div>
+  </div>
+</div>
+
 <div id="modal-root"><div id="modal-bg" onclick="closeModal()"></div><div id="modal"></div></div>
 <div id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="template-generator.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

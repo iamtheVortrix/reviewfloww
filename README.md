@@ -14,6 +14,11 @@ Open this on your phone. Bottom nav: **Home · Clients · Cards · Map**.
   2. **Build route order** — uses your GPS as the start, optimizes the stop order (real road distances via OSRM, 2-opt) → stops numbered 1, 2, 3…
   3. Work the route: per stop → Pitched / Bought / No + 1-line note, navigate button opens Google Maps to that stop. The Maps button opens the next 9 unvisited stops as one Google Maps route.
   4. Progress bar + stats feed back to Home.
+- **Sectors** — Mumbai split into **100 micro-sectors** (T1 premium first, then T2, then T3; one sector = one pitch day). Flow per sector:
+  1. Open a sector → **🔍 Find businesses** — pulls real businesses from **live OSM data** (via Overpass, ~2 km radius). Tick the good ones → Add selected.
+  2. **🧭 Build route order** — GPS start, NN + 2-opt over OSRM road distances → stops numbered 1, 2, 3…
+  3. A **live 3D map** (MapLibre GL, pitched 3D buildings) shows every stop in route order with the route line. Same per-stop workflow: Pitched / Bought / No + note, per-stop Google Maps navigation, Maps button for the next 9 stops.
+  4. Honest by design: OSM has no Google review counts and coverage varies — the UI says so. Nothing is fabricated.
 
 All admin data lives in your browser's localStorage — use **Export** on Home for backups.
 
