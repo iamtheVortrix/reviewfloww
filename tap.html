@@ -149,26 +149,21 @@ h2.rtitle{font-size:24px;margin:0 0 14px;letter-spacing:-.3px}
    1. Deploy worker.js, then paste its URL below.
    2. Upload this folder to GitHub Pages.
    ============================================================ */
-const WORKER_URL = "PASTE_YOUR_WORKER_URL_HERE"; // e.g. https://nfc-review.yourname.workers.dev
+var WORKER_URL = "PASTE_YOUR_WORKER_URL_HERE"; // e.g. https://nfc-review.yourname.workers.dev
+// tolerate a pasted URL with a trailing slash — the worker matches exact paths
+WORKER_URL = WORKER_URL.replace(/\/+$/, "");
 
 const DEMO_CONFIG = {
   name: "Demo Café",
   color: "#d8a94e",
   welcome: "Thanks for stopping by! Tap through these quick questions — it takes about 30 seconds.",
   google_link: "",
-  questions: [
-    { id: "q1", text: "How was the food & coffee?", type: "rating" },
-    { id: "q2", text: "How was the service?", type: "rating" },
-    { id: "q3", text: "What did you love most?", type: "chips", multi: true,
-      options: ["Taste", "Ambience", "Service", "Value for money", "Hygiene"] },
-    { id: "q4", text: "How likely are you to visit again?", type: "rating" }
-  ]
+  questions: v3DefaultQuestions()
 };
 
-const EMOJIS = ["😞", "😐", "🙂", "😄", "🤩"];
-const EMOJI_LABELS = ["Poor", "Okay", "Good", "Great", "Amazing"];
+const WRITE_OWN_LABEL = "Write your own words";
 
-let config = null, qi = 0, answers = {};
+let config = null, qi = 0, answers = {}, answersMeta = {};
 
 function $(id){ return document.getElementById(id); }
 function showScreen(id){
@@ -203,10 +198,13 @@ async function boot(){
 }
 
 function startQuiz(){
-  qi = 0; answers = {};
+  qi = 0; answers = {}; answersMeta = {};
   renderQuestion();
   showScreen("screen-quiz");
 }
+
+const EMOJIS = ["😞", "😐", "🙂", "😄", "🤩"];
+const EMOJI_LABELS = ["Poor", "Okay", "Good", "Great", "Amazing"];
 
 function renderQuestion(){
   const q = config.questions[qi];
@@ -216,13 +214,39 @@ function renderQuestion(){
   card.innerHTML = "";
   const contBtn = $("qcontinue");
   contBtn.classList.add("hidden");
+  contBtn.onclick = null;
 
   const h = document.createElement("h2");
   h.className = "qtext";
   h.textContent = q.text;
   card.appendChild(h);
 
-  if(q.type === "rating"){
+  if(q.type === "choice"){
+    // v3: single-tap chips, no emojis, plus "Write your own words"
+    const wrap = document.createElement("div");
+    wrap.className = "chips";
+    (q.options || []).forEach(function(opt){
+      const b = document.createElement("button");
+      b.className = "chip";
+      b.textContent = opt;
+      b.onclick = function(){
+        answers[q.id] = opt;
+        answersMeta[q.id] = "preset";
+        Array.prototype.forEach.call(wrap.children, function(x){ x.classList.remove("sel"); });
+        b.classList.add("sel");
+        setTimeout(next, 380);
+      };
+      wrap.appendChild(b);
+    });
+    const own = document.createElement("button");
+    own.className = "chip";
+    own.style.borderStyle = "dashed";
+    own.textContent = WRITE_OWN_LABEL;
+    own.onclick = function(){ showOwnComposer(q); };
+    wrap.appendChild(own);
+    card.appendChild(wrap);
+  } else if(q.type === "rating"){
+    // legacy v2 emoji ratings (old published configs)
     const row = document.createElement("div");
     row.className = "emojis";
     EMOJIS.forEach(function(e, i){
@@ -244,6 +268,7 @@ function renderQuestion(){
     labels.innerHTML = "<span>" + EMOJI_LABELS[0] + "</span><span>" + EMOJI_LABELS[4] + "</span>";
     card.appendChild(labels);
   } else {
+    // legacy v2 chips
     const wrap = document.createElement("div");
     wrap.className = "chips";
     const selected = new Set();
@@ -275,6 +300,41 @@ function renderQuestion(){
   card.classList.add("slide");
 }
 
+function showOwnComposer(q){
+  const card = $("qcard");
+  card.innerHTML = "";
+  const h = document.createElement("h2");
+  h.className = "qtext";
+  h.textContent = q.text;
+  card.appendChild(h);
+  const ta = document.createElement("textarea");
+  ta.id = "ownWords";
+  ta.placeholder = "Type it in your own words…";
+  ta.style.minHeight = "110px";
+  card.appendChild(ta);
+  const use = document.createElement("button");
+  use.className = "btn";
+  use.style.marginTop = "14px";
+  use.textContent = "Use these words →";
+  use.onclick = function(){
+    const t = ta.value.trim();
+    if(!t){ ta.focus(); return; }
+    answers[q.id] = t;
+    answersMeta[q.id] = "own";
+    next();
+  };
+  card.appendChild(use);
+  const back = document.createElement("button");
+  back.className = "btn ghost";
+  back.textContent = "← Back to options";
+  back.onclick = function(){ renderQuestion(); };
+  card.appendChild(back);
+  setTimeout(function(){ ta.focus(); }, 350);
+  card.classList.remove("slide");
+  void card.offsetWidth;
+  card.classList.add("slide");
+}
+
 function next(){
   $("progressFill").style.width = ((qi + 1) / config.questions.length * 100) + "%";
   qi++;
@@ -284,19 +344,31 @@ function next(){
 
 async function finishQuiz(){
   showScreen("screen-generating");
+  // v3: local generator is the reliable core — always ready, never blocks.
   let text = "";
   try{
-    if(workerReady()){
+    text = generateTemplateReview(config.name, config.questions, answers, answersMeta) || "";
+  }catch(e){ text = ""; }
+  // Groq polishes on top. Bounded wait, silent fallback to the local draft.
+  if(workerReady()){
+    try{
+      const ctrl = new AbortController();
+      const to = setTimeout(function(){ ctrl.abort(); }, 6000);
       const r = await fetch(WORKER_URL + "/generate-review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ business_name: config.name, questions: config.questions, answers: answers })
+        body: JSON.stringify({ business_name: config.name, questions: config.questions, answers: answers }),
+        signal: ctrl.signal
       });
+      clearTimeout(to);
       const d = await r.json();
-      if(d && d.review && !d.use_fallback){ text = d.review; }
-    }
-  }catch(e){ /* fall through to offline template */ }
-  if(!text){ text = generateTemplateReview(config.name, config.questions, answers); }
+      if(d && typeof d.review === "string" && !d.use_fallback){
+        const polished = d.review.trim().replace(/^[“"']+|[”"']+$/g, "");
+        if(polished.length > 30) text = polished;
+      }
+    }catch(e){ /* silently keep the local draft */ }
+  }
+  if(!text) text = "Had a great time here — would definitely recommend it.";
   $("reviewText").value = text;
   // small beat so the "drafting" animation feels real
   setTimeout(function(){ showScreen("screen-review"); }, 600);

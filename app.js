@@ -7,6 +7,7 @@
 
 /* ---------------- Mumbai pitch zones ---------------- */
 const ZONES = [
+  { id:"s001",     name:"S001 · Bandra West",  area:"Linking Rd · Pali Hill · Carter Rd · Bandstand · Waterfield Rd", lat:19.0596, lon:72.8295, r:2500 },
   { id:"south",    name:"South Mumbai",        area:"Colaba · Fort · Churchgate · Worli",   lat:18.9154, lon:72.8259, r:4500 },
   { id:"bandra",   name:"Bandra · Khar",       area:"Bandra West · Khar · Santacruz West",   lat:19.0559, lon:72.8297, r:3500 },
   { id:"andheriw", name:"Andheri West",        area:"Andheri West · Juhu · Versova",         lat:19.1293, lon:72.8314, r:4000 },
@@ -22,7 +23,7 @@ const CATS = ["Restaurant","Cafe","Salon","Clinic","Gym","Retail","Hotel","Other
 
 /* ---------------- store ---------------- */
 const DB_KEY = "vortrix_v2";
-let db = { settings:{workerUrl:"",adminKey:""}, clients:[], cards:[], pitch:{} };
+let db = { settings:{workerUrl:"",adminKey:""}, clients:[], cards:[], pitch:{}, sectors:{}, sectorMeta:{} };
 try {
   const raw = localStorage.getItem(DB_KEY);
   if (raw) db = Object.assign(db, JSON.parse(raw));
@@ -70,6 +71,9 @@ function pitchAll(){
   Object.keys(db.pitch||{}).forEach(function(z){
     (db.pitch[z]||[]).forEach(function(p){ out.push(p); });
   });
+  Object.keys(db.sectors||{}).forEach(function(z){
+    (db.sectors[z]||[]).forEach(function(p){ out.push(p); });
+  });
   return out;
 }
 function renderHome(){
@@ -113,7 +117,7 @@ function importData(input){
     try{
       const d = JSON.parse(r.result);
       if(!d || !Array.isArray(d.clients)) throw new Error("bad file");
-      db = Object.assign({settings:{workerUrl:"",adminKey:""},clients:[],cards:[],pitch:{}}, d);
+      db = Object.assign({settings:{workerUrl:"",adminKey:""},clients:[],cards:[],pitch:{},sectors:{},sectorMeta:{}}, d);
       save(); renderAll(); toast("Backup restored");
     }catch(e){ toast("That file didn't look like a backup"); }
     input.value = "";
@@ -214,6 +218,9 @@ function deleteClient(id){
 }
 
 function defaultQuestions(cat){
+  // v3: one universal 8-question psychological flow for every niche.
+  // (Niche-specific option packs can extend this later.)
+  if (typeof v3DefaultQuestions === "function") return v3DefaultQuestions();
   const loved = ["Taste / quality","Ambience","Service","Value for money","Hygiene"];
   if(cat==="Salon") loved.push("Haircut / styling");
   const q = {
@@ -323,8 +330,8 @@ function deleteCard(code){
   save(); closeModal(); renderAll(); toast("Deleted");
 }
 
-function renderAll(){ renderHome(); renderClients(); renderCards(); renderZones(); }
-document.addEventListener("DOMContentLoaded", renderAll);
+function renderAll(){ renderHome(); renderClients(); renderCards(); renderZones(); renderSectors(); }
+document.addEventListener("DOMContentLoaded", function(){ renderAll(); loadSectors(); });
 
 /* ================= ZONES & PITCH MAP ================= */
 let currentZone = null;
@@ -363,6 +370,7 @@ function openZone(id){
   renderZoneDetail();
   initZMap(z);
   drawMarkers();
+  document.getElementById("sector-load-btn").style.display = (id==="s001") ? "" : "none";
   document.getElementById("zoneview").scrollTop = 0;
 }
 function closeZone(){
@@ -458,6 +466,29 @@ function drawMarkers(){
   }
 }
 
+/* ---------------- curated sector lists ---------------- */
+async function loadSectorStops(){
+  const z = currentZoneObj(); if(!z) return;
+  if(!confirm("Load the curated S001 · Bandra West list (85 researched stops)? This replaces the current pitch list for this zone.")) return;
+  openModal('<h3>📥 Loading sector list…</h3><p class="hintline">Fetching the researched stops.</p>');
+  try{
+    const r = await fetch("./sector-data/S001-bandra-west.json");
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const d = await r.json();
+    const tag = Date.now().toString(36);
+    db.pitch[z.id] = (d.stops||[]).map(function(s,i){
+      return { oid:"s001_"+tag+"_"+i, name:s.name, cat:s.cat, lat:s.lat, lon:s.lon,
+               addr:s.area, order:s.stop, status:"new", note:"" };
+    });
+    save(); closeModal(); renderZoneDetail(); drawMarkers();
+    toast("Loaded "+db.pitch[z.id].length+" sector stops ✓");
+  }catch(e){
+    openModal('<h3>Couldn\'t load the sector list</h3>'+
+      '<p class="hintline">'+esc(String((e&&e.message)||e))+' — make sure the <b>sector-data</b> folder was uploaded to GitHub next to index.html.</p>'+
+      '<div class="btnrow"><button class="btn" onclick="closeModal()">OK</button></div>');
+  }
+}
+
 /* ---------------- research (OpenStreetMap) ---------------- */
 function catLabel(t){
   function pretty(s){ return s.replace(/_/g," ").replace(/\b\w/g,function(c){return c.toUpperCase();}); }
@@ -465,6 +496,7 @@ function catLabel(t){
   if(t.amenity) return pretty(t.amenity);
   if(t.leisure) return pretty(t.leisure);
   if(t.tourism) return pretty(t.tourism);
+  if(t.office) return pretty(t.office)+" office";
   return "Business";
 }
 function addrOf(t){
@@ -651,6 +683,582 @@ function openMapsChunk(){
     .sort(function(a,b){return a.order-b.order;}).slice(0,9);
   if(!list.length){ toast("Nothing left to visit here 🎉"); return; }
   const meta = (db.pitchMeta&&db.pitchMeta[z.id]) || {startLat:z.lat, startLon:z.lon};
+  const origin = meta.startLat+","+meta.startLon;
+  const dest = list[list.length-1].lat+","+list[list.length-1].lon;
+  const wp = list.slice(0,-1).map(function(p){return p.lat+","+p.lon;}).join("|");
+  let url = "https://www.google.com/maps/dir/?api=1&origin="+origin+"&destination="+dest+"&travelmode=driving";
+  if(wp) url += "&waypoints="+encodeURIComponent(wp);
+  window.open(url,"_blank");
+}
+
+/* ============================================================
+   SECTORS — 100-sector Mumbai pitch map.
+   Tap sector → live OSM business discovery (Overpass) → select →
+   ordered route (GPS start, NN + 2-opt over OSRM) → live 3D map.
+   HONESTY: OSM has no Google review counts and coverage varies —
+   the UI says so. Nothing is fabricated.
+   Stops live in db.sectors (localStorage). Old zone tab untouched.
+   ============================================================ */
+let SECTORS100 = [];
+let currentSector = null;
+let secmap = null;
+let secMarkers = [];
+let sectorResearchResults = [];
+
+function sectorById(id){ return SECTORS100.find(function(s){return s.id===id;}); }
+function sectorStops(sid){ return db.sectors[sid] || (db.sectors[sid] = []); }
+
+async function loadSectors(){
+  try{
+    const r = await fetch("./sector-data/sectors.json");
+    if(r.ok) SECTORS100 = await r.json();
+  }catch(e){}
+  renderSectors();
+}
+function tierPill(tier){
+  const label = tier===1? "T1 · Premium" : tier===2? "T2 · Mid" : "T3";
+  return '<span class="pill t'+tier+'">'+label+'</span>';
+}
+function renderSectors(){
+  const el = document.getElementById("sector-list");
+  if(!el) return;
+  const q = (document.getElementById("sector-search").value||"").toLowerCase();
+  if(!SECTORS100.length){
+    el.innerHTML = '<div class="empty">Sector data not loaded yet.<br>Check your connection and reopen the app.</div>';
+    return;
+  }
+  const items = SECTORS100.filter(function(s){
+    return !q || (s.id+" "+s.name+" "+s.landmarks+" "+s.parent).toLowerCase().indexOf(q)>=0;
+  });
+  if(!items.length){
+    el.innerHTML = '<div class="empty">No sectors match that search.</div>';
+    return;
+  }
+  el.innerHTML = items.map(function(s){
+    const list = db.sectors[s.id]||[];
+    const done = list.filter(function(p){return p.status!=="new";}).length;
+    const bought = list.filter(function(p){return p.status==="bought";}).length;
+    return '<div class="card" onclick="openSector(\''+s.id+'\')" style="cursor:pointer">'+
+      '<div class="row"><div class="grow"><div class="name">📌 '+s.id+' · '+esc(s.name)+'</div>'+
+      '<div class="sub2">'+esc(s.landmarks)+'</div></div>'+
+      '<span style="color:var(--muted);font-size:20px">›</span></div>'+
+      '<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">'+
+        tierPill(s.tier)+
+        '<span class="pill">'+list.length+' stops</span>'+
+        (done? '<span class="pill">✓ '+done+' done</span>':"")+
+        (bought? '<span class="pill green">💰 '+bought+' bought</span>':"")+
+      '</div></div>';
+  }).join("");
+}
+
+function openSector(id){
+  const s = sectorById(id);
+  if(!s || typeof s.lat!=="number"){ toast("Sector data not loaded yet"); return; }
+  currentSector = id;
+  document.getElementById("sec-name").textContent = s.id+" · "+s.name;
+  document.getElementById("sec-sub").textContent = s.landmarks;
+  document.getElementById("sec-tier").innerHTML = tierPill(s.tier);
+  document.getElementById("sectorview").classList.add("open");
+  document.body.style.overflow = "hidden";
+  renderSectorDetail();
+  sectorCuratedProbe();
+  initSecMap(s);
+  document.getElementById("sectorview").scrollTop = 0;
+}
+function closeSector(){
+  destroySecMap();
+  document.getElementById("sectorview").classList.remove("open");
+  document.body.style.overflow = "";
+  currentSector = null;
+  renderSectors(); renderHome();
+}
+
+function renderSectorDetail(){
+  const s = sectorById(currentSector); if(!s) return;
+  const list = sectorStops(s.id).slice().sort(function(a,b){
+    return (a.order||9999)-(b.order||9999);
+  });
+  const done = list.filter(function(p){return p.status!=="new";}).length;
+  document.getElementById("sec-count").textContent = "· "+list.length;
+  document.getElementById("sec-progress-label").textContent =
+    list.length? done+" of "+list.length+" visited" : "No stops yet — hit Find businesses";
+  document.getElementById("sec-progress").style.width =
+    list.length? Math.round(done/list.length*100)+"%" : "0%";
+  const box = document.getElementById("sec-list");
+  if(!list.length){
+    box.innerHTML = '<div class="empty">Few businesses mapped here yet — widen the search or add manually.</div>'+
+      '<div class="btnrow" style="margin-bottom:8px"><button class="btn" onclick="sectorResearch()">🔍 Find businesses</button></div>'+
+      '<div class="btnrow"><button class="btn ghost" onclick="sectorWidenSearch()">🌐 Widen search</button>'+
+      '<button class="btn ghost" onclick="sectorAddManual()">➕ Add manually</button></div>';
+    return;
+  }
+  box.innerHTML = list.map(function(p){
+    const nb = p.status==="bought"
+      ? '<div class="num bought">'+(p.order||"💰")+'</div>'
+      : '<div class="num'+(p.status!=="new"?" done":"")+'">'+(p.order||"•")+'</div>';
+    function sb(st,label){
+      return '<button class="sbtn'+(p.status===st?" on-"+st:"")+'" onclick="sectorSetStatus(\''+p.oid+'\',\''+st+'\')">'+label+'</button>';
+    }
+    return '<div class="card"><div class="row">'+nb+'<div class="grow">'+
+      '<div class="name" style="font-size:15px">'+esc(p.name)+'</div>'+
+      ((p.rating&&p.reviews)? '<div class="sub2">★ '+esc(String(p.rating))+' · '+esc(String(p.reviews))+' Google reviews</div>':"")+
+      '<div class="sub2">'+esc(p.cat||"")+(p.addr? " · "+esc(p.addr):"")+
+        ((p.manual||p.curated)? " · "+(p.manual?"✋ manual":"📂 curated"):"")+'</div></div>'+
+      '<button class="iconbtn" onclick="window.open(\'https://www.google.com/maps/dir/?api=1&destination='+p.lat+','+p.lon+'\',\'_blank\')">🧭</button></div>'+
+      '<div class="statusbtns">'+sb("pitched","✓ Pitched")+sb("bought","💰 Bought")+sb("no","✗ No")+'</div>'+
+      '<input class="notein" placeholder="1-line note…" value="'+esc(p.note||"")+'" onchange="sectorSetNote(\''+p.oid+'\',this.value)">'+
+      '</div>';
+  }).join("");
+}
+function sectorSetStatus(oid, s){
+  const list = sectorStops(currentSector);
+  const p = list.find(function(x){return x.oid===oid;});
+  if(!p) return;
+  p.status = (p.status===s)? "new" : s;
+  save(); renderSectorDetail(); drawSectorMarkers();
+}
+function sectorSetNote(oid, v){
+  const list = sectorStops(currentSector);
+  const p = list.find(function(x){return x.oid===oid;});
+  if(p){ p.note = v; save(); }
+}
+
+/* ---------------- live 3D map (MapLibre GL) ---------------- */
+function destroySecMap(){
+  try{ secMarkers.forEach(function(m){ m.remove(); }); }catch(e){}
+  secMarkers = [];
+  if(secmap){ try{ secmap.remove(); }catch(e){} secmap = null; }
+}
+function initSecMap(s){
+  destroySecMap();
+  if(!window.maplibregl){
+    document.getElementById("secmap").innerHTML =
+      '<div class="empty">3D map needs the MapLibre library (internet).<br>The stop list below still works.</div>';
+    return;
+  }
+  try{
+    secmap = new maplibregl.Map({
+      container:"secmap",
+      style:"https://tiles.openfreemap.org/styles/positron",
+      center:[s.lon, s.lat],
+      zoom:14.2, pitch:60, bearing:-15
+    });
+    secmap.addControl(new maplibregl.NavigationControl(), "top-right");
+    secmap.on("load", function(){
+      try{
+        if(!secmap.getLayer("vortrix-3d")){
+          secmap.addLayer({
+            id:"vortrix-3d",
+            source:"openmaptiles",
+            "source-layer":"building",
+            type:"fill-extrusion",
+            minzoom:13.5,
+            paint:{
+              "fill-extrusion-color":"#c9a35a",
+              "fill-extrusion-height":["interpolate",["linear"],["zoom"],13.5,0,15,["coalesce",["get","render_height"],12]],
+              "fill-extrusion-base":["coalesce",["get","render_min_height"],0],
+              "fill-extrusion-opacity":0.55
+            }
+          });
+        }
+      }catch(e){}
+      drawSectorMarkers();
+    });
+  }catch(e){
+    document.getElementById("secmap").innerHTML =
+      '<div class="empty">3D map failed to start.<br>The stop list below still works.</div>';
+    secmap = null;
+  }
+  setTimeout(function(){ if(secmap) secmap.resize(); }, 400);
+  drawSectorMarkers();
+}
+function drawSectorMarkers(){
+  if(!secmap || !window.maplibregl) return;
+  const s = sectorById(currentSector); if(!s) return;
+  try{ secMarkers.forEach(function(m){ m.remove(); }); }catch(e){}
+  secMarkers = [];
+  const list = (db.sectors[s.id]||[]).filter(function(p){return p.lat && p.lon;});
+  const ordered = list.filter(function(p){return p.order;}).sort(function(a,b){return a.order-b.order;});
+  list.forEach(function(p){
+    const el = document.createElement("div");
+    el.className = "ml-num"+((p.status==="bought"||p.status==="no")?" dim":"");
+    el.textContent = p.order||"•";
+    const mk = new maplibregl.Marker({element:el})
+      .setLngLat([p.lon, p.lat])
+      .setPopup(new maplibregl.Popup({offset:25})
+        .setHTML("<b>"+esc(p.name)+"</b><br>"+esc(p.cat||"")))
+      .addTo(secmap);
+    secMarkers.push(mk);
+  });
+  if(secmap.isStyleLoaded()){
+    try{
+      const pts = ordered.length>1? ordered : list;
+      const data = {type:"FeatureCollection", features: pts.length? [{
+        type:"Feature",
+        geometry:{type:"LineString", coordinates:pts.map(function(p){return [p.lon,p.lat];})},
+        properties:{}
+      }] : []};
+      if(secmap.getSource("sec-route")){
+        secmap.getSource("sec-route").setData(data);
+      } else if(ordered.length>1){
+        secmap.addSource("sec-route", {type:"geojson", data:data});
+        secmap.addLayer({
+          id:"sec-route-line", type:"line", source:"sec-route",
+          paint:{"line-color":"#d8a94e","line-width":4,"line-opacity":0.85}
+        });
+      }
+    }catch(e){}
+  }
+  try{
+    if(list.length){
+      const b = new maplibregl.LngLatBounds();
+      list.forEach(function(p){ b.extend([p.lon,p.lat]); });
+      secmap.fitBounds(b, {padding:50, pitch:60, duration:800});
+    } else {
+      secmap.flyTo({center:[s.lon,s.lat], zoom:14.2, pitch:60});
+    }
+  }catch(e){}
+}
+
+/* ---------------- live business discovery (Overpass) ---------------- */
+function sectorOverpassQL(s, radius){
+  radius = radius || 2000;
+  const r = radius+","+s.lat+","+s.lon;
+  return "[out:json][timeout:35];("+
+    'nwr["shop"~"^(clothes|shoes|jewelry|beauty|cosmetics|hairdresser|massage|bakery|pastry|confectionery|florist|gift|optician|mobile_phone|electronics|furniture|books|bicycle|car|motorcycle|travel_agency|department_store|supermarket|mall)$"](around:'+r+");"+
+    'nwr["amenity"~"^(restaurant|cafe|fast_food|bar|ice_cream|beauty|dentist|doctors|clinic|pharmacy|gym|spa)$"](around:'+r+");"+
+    'nwr["leisure"="fitness_centre"](around:'+r+");"+
+    'nwr["tourism"="hotel"](around:'+r+");"+
+    'nwr["office"](around:'+r+");"+
+    ");out center 150;";
+}
+async function overpassFetch(ql){
+  const urls = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter"
+  ];
+  let lastErr = null;
+  for(let a=0; a<4; a++){
+    const url = urls[a % urls.length];
+    try{
+      const r = await fetch(url, {
+        method:"POST",
+        headers:{ "Content-Type":"application/x-www-form-urlencoded" },
+        body:"data="+encodeURIComponent(ql)
+      });
+      if(r.status===429 || r.status===502 || r.status===504 || r.status===503){
+        lastErr = new Error("Overpass busy ("+r.status+") — retrying…");
+      } else if(!r.ok){
+        lastErr = new Error("Overpass error "+r.status);
+      } else {
+        return await r.json();
+      }
+    }catch(e){
+      if(!lastErr || /busy/.test(String(lastErr))) lastErr = e;
+    }
+    await new Promise(function(res){ setTimeout(res, 2000*(a+1)); });
+  }
+  throw lastErr || new Error("Overpass failed");
+}
+/* Extract prospects from an Overpass response, excluding stops already in the sector list. */
+function collectSectorProspects(s, d){
+  const list = sectorStops(s.id);
+  const have = {};
+  const haveName = {};
+  list.forEach(function(p){
+    have[p.oid]=1;
+    haveName[(p.name||"").toLowerCase().trim().replace(/\s+/g," ")]=1;
+  });
+  const seen = {};
+  const out = [];
+  (d.elements||[]).forEach(function(e){
+    if(!e.tags || !e.tags.name) return;
+    const lat = e.lat || (e.center && e.center.lat);
+    const lon = e.lon || (e.center && e.center.lon);
+    if(!lat || !lon) return;
+    const oid = "sec"+e.type[0]+e.id;
+    const norm = e.tags.name.toLowerCase().trim().replace(/\s+/g," ");
+    if(have[oid] || haveName[norm]) return;
+    const key = norm+"|"+lat.toFixed(3)+","+lon.toFixed(3);
+    if(seen[key]) return;
+    seen[key] = 1;
+    out.push({
+      oid:oid, name:e.tags.name, cat:catLabel(e.tags),
+      lat:lat, lon:lon, addr:addrOf(e.tags),
+      dist:hav({lat:s.lat,lon:s.lon},{lat:lat,lon:lon})
+    });
+  });
+  out.sort(function(a,b){ return a.dist-b.dist; });
+  return out.slice(0,150);
+}
+/* Merge two prospect arrays, deduped by oid, sorted by distance, capped at 150. */
+function mergeProspects(base, extra){
+  const seen = {};
+  base.forEach(function(c){ seen[c.oid]=1; });
+  extra.forEach(function(c){ if(!seen[c.oid]){ seen[c.oid]=1; base.push(c); } });
+  base.sort(function(a,b){ return a.dist-b.dist; });
+  return base.slice(0,150);
+}
+async function sectorResearch(){
+  const s = sectorById(currentSector); if(!s) return;
+  openModal('<h3>🔍 Finding businesses in '+esc(s.name)+'</h3>'+
+    '<p class="hintline">Scanning <b>live OSM data</b> within ~2 km — restaurants, cafes, salons, clinics, gyms, hotels & shops…<br>'+
+    '<b>No review counts</b> — OSM doesn\'t have them. Coverage varies by area.</p>');
+  try{
+    let results = collectSectorProspects(s, await overpassFetch(sectorOverpassQL(s)));
+    let radiusNote = "~2 km";
+    if(results.length < 20){
+      // thin coverage — auto-retry once with a wider radius, then merge
+      try{
+        const d2 = await overpassFetch(sectorOverpassQL(s, 3500));
+        results = mergeProspects(results, collectSectorProspects(s, d2));
+        radiusNote = "few spots nearby — auto-widened to ~3.5 km";
+      }catch(e2){ /* keep first-pass results */ }
+    }
+    sectorResearchResults = results;
+    if(!sectorResearchResults.length){
+      openModal('<h3>Nothing found here yet</h3>'+
+        '<p class="hintline">Few businesses mapped here yet — widen the search or add manually.</p>'+
+        '<div class="btnrow"><button class="btn" onclick="sectorWidenSearch()">🌐 Widen search (5 km)</button>'+
+        '<button class="btn ghost" onclick="sectorAddManual()">➕ Add manually</button></div>'+
+        '<div class="btnrow"><button class="btn ghost" onclick="closeModal()">Close</button></div>');
+      return;
+    }
+    showSectorResearchModal(s, radiusNote);
+  }catch(e){
+    openModal('<h3>Search failed</h3>'+
+      '<p class="hintline">'+esc(String((e&&e.message)||e))+'<br>Overpass (the OSM server) can be slow or rate-limited. Check your connection and retry.</p>'+
+      '<div class="btnrow"><button class="btn" onclick="closeModal()">Close</button>'+
+      '<button class="btn ghost" onclick="sectorResearch()">↻ Retry</button></div>');
+  }
+}
+/* Manual "widen search" — re-run discovery at 5 km and merge anything new. */
+async function sectorWidenSearch(){
+  const s = sectorById(currentSector); if(!s) return;
+  openModal('<h3>🌐 Widening search…</h3>'+
+    '<p class="hintline">Pulling live OSM data within ~5 km of '+esc(s.name)+'.</p>');
+  try{
+    const fresh = collectSectorProspects(s, await overpassFetch(sectorOverpassQL(s, 5000)));
+    sectorResearchResults = mergeProspects(sectorResearchResults, fresh);
+    if(!sectorResearchResults.length){
+      openModal('<h3>Still nothing mapped here</h3>'+
+        '<p class="hintline">Few businesses mapped here yet — add them manually as you walk the sector.</p>'+
+        '<div class="btnrow"><button class="btn" onclick="sectorAddManual()">➕ Add manually</button>'+
+        '<button class="btn ghost" onclick="closeModal()">Close</button></div>');
+      return;
+    }
+    showSectorResearchModal(s, "widened to ~5 km");
+  }catch(e){
+    openModal('<h3>Widen failed</h3>'+
+      '<p class="hintline">'+esc(String((e&&e.message)||e))+'<br>Overpass can be slow or rate-limited. Retry in a bit.</p>'+
+      '<div class="btnrow"><button class="btn" onclick="closeModal()">Close</button>'+
+      '<button class="btn ghost" onclick="sectorWidenSearch()">↻ Retry</button></div>');
+  }
+}
+function showSectorResearchModal(s, radiusNote){
+  const rows = sectorResearchResults.map(function(c,i){
+    return '<label class="resrow"><input type="checkbox" data-i="'+i+'" checked>'+
+      '<span class="grow"><b>'+esc(c.name)+'</b><br>'+
+      '<span class="sub2">'+esc(c.cat)+(c.addr?" · "+esc(c.addr):"")+' · '+c.dist.toFixed(1)+' km</span></span></label>';
+  }).join("");
+  openModal(
+    '<h3>'+sectorResearchResults.length+' found in '+esc(s.name)+'</h3>'+
+    '<p class="sub2" style="margin:-6px 0 8px">live OSM data · '+(radiusNote||"~2 km")+'</p>'+
+    '<p class="hintline">Live OSM data — no review counts, coverage varies. Tick the good ones worth pitching (aim 50–70).</p>'+
+    '<div class="btnrow" style="margin-bottom:8px">'+
+      '<button class="btn ghost small" onclick="sectorCheckAll(true)">Select all</button>'+
+      '<button class="btn ghost small" onclick="sectorCheckAll(false)">Clear</button>'+
+      '<button class="btn ghost small" onclick="sectorWidenSearch()">🌐 Widen (5 km)</button></div>'+
+    '<div style="max-height:46vh;overflow-y:auto">'+rows+'</div>'+
+    '<div class="btnrow"><button class="btn" id="secres-add" onclick="sectorAddResearch()">Add selected</button></div>'
+  );
+  sectorUpdateResCount();
+  document.querySelectorAll('#modal input[type=checkbox]').forEach(function(cb){
+    cb.addEventListener("change", sectorUpdateResCount);
+  });
+}
+function sectorCheckAll(v){
+  document.querySelectorAll('#modal input[type=checkbox]').forEach(function(cb){ cb.checked=v; });
+  sectorUpdateResCount();
+}
+function sectorUpdateResCount(){
+  const n = document.querySelectorAll('#modal input[type=checkbox]:checked').length;
+  const b = document.getElementById("secres-add");
+  if(b) b.textContent = "Add selected ("+n+")";
+}
+function sectorAddResearch(){
+  const s = sectorById(currentSector); if(!s) return;
+  const list = sectorStops(s.id);
+  let added = 0;
+  document.querySelectorAll('#modal input[type=checkbox]:checked').forEach(function(cb){
+    const c = sectorResearchResults[parseInt(cb.dataset.i,10)];
+    if(c && !list.some(function(p){return p.oid===c.oid;})){
+      list.push({ oid:c.oid, name:c.name, cat:c.cat, lat:c.lat, lon:c.lon,
+                  addr:c.addr, status:"new", note:"", order:null });
+      added++;
+    }
+  });
+  save(); closeModal();
+  renderSectorDetail(); drawSectorMarkers();
+  toast(added+" added — now build the route 🧭");
+}
+
+/* ---------------- manual add (Nominatim geocode + pin confirm) ---------------- */
+let sectorManualCands = [];
+async function sectorAddManual(){
+  const s = sectorById(currentSector); if(!s) return;
+  openModal('<h3>➕ Add business manually</h3>'+
+    '<p class="hintline">Type the business name as it appears on its board or on Google. We\'ll find it on the map and you confirm the pin.</p>'+
+    '<input id="man-name" class="notein" placeholder="Business name…" style="margin-bottom:8px">'+
+    '<input id="man-cat" class="notein" placeholder="Category (optional) e.g. Salon">'+
+    '<div class="btnrow"><button class="btn" onclick="sectorManualGeocode()">📍 Find on map</button>'+
+    '<button class="btn ghost" onclick="closeModal()">Cancel</button></div>');
+  setTimeout(function(){ const i=document.getElementById("man-name"); if(i) i.focus(); }, 100);
+}
+async function sectorManualGeocode(){
+  const s = sectorById(currentSector); if(!s) return;
+  const name = (document.getElementById("man-name").value||"").trim();
+  const cat = (document.getElementById("man-cat").value||"").trim();
+  if(!name){ toast("Type a business name first"); return; }
+  openModal('<h3>Searching…</h3><p class="hintline">Looking up "'+esc(name)+'" near '+esc(s.name)+'.</p>');
+  try{
+    const q = name+" "+s.name+" Mumbai India";
+    const r = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&q="+encodeURIComponent(q),
+      { headers:{ "Accept":"application/json" } });
+    if(!r.ok) throw new Error("nominatim "+r.status);
+    const res = await r.json();
+    if(!res.length){
+      openModal('<h3>No match found</h3>'+
+        '<p class="hintline">Nothing found for "'+esc(name)+'". Try a more specific name — add the road or landmark, e.g. "'+esc(name)+' Linking Road".</p>'+
+        '<div class="btnrow"><button class="btn ghost" onclick="sectorAddManual()">← Back</button>'+
+        '<button class="btn ghost" onclick="closeModal()">Cancel</button></div>');
+      return;
+    }
+    sectorManualCands = res.map(function(p){
+      return { name:name, cat:cat,
+        lat:parseFloat(p.lat), lon:parseFloat(p.lon),
+        addr:(p.display_name||"").split(",").slice(0,2).join(","), full:p.display_name||"" };
+    });
+    const rows = sectorManualCands.map(function(c,i){
+      return '<div class="card" style="margin-bottom:8px"><div class="row"><div class="grow">'+
+        '<div class="name" style="font-size:15px">'+esc(c.full.split(",").slice(0,2).join(","))+'</div>'+
+        '<div class="sub2">'+esc(c.full)+'</div></div>'+
+        '<button class="btn small" onclick="sectorConfirmManual('+i+')">Use this</button></div></div>';
+    }).join("");
+    openModal('<h3>Confirm the pin</h3><p class="hintline">Pick the right location for <b>'+esc(name)+'</b>:</p>'+
+      '<div style="max-height:46vh;overflow-y:auto">'+rows+'</div>'+
+      '<div class="btnrow"><button class="btn ghost" onclick="sectorAddManual()">← Back</button></div>');
+  }catch(e){
+    openModal('<h3>Lookup failed</h3>'+
+      '<p class="hintline">'+esc(String((e&&e.message)||e))+'<br>Check your connection and retry.</p>'+
+      '<div class="btnrow"><button class="btn ghost" onclick="sectorAddManual()">← Back</button></div>');
+  }
+}
+function sectorConfirmManual(i){
+  const s = sectorById(currentSector); if(!s) return;
+  const c = sectorManualCands[i]; if(!c) return;
+  const list = sectorStops(s.id);
+  const norm = c.name.toLowerCase().trim();
+  if(list.some(function(p){ return (p.name||"").toLowerCase().trim()===norm; })){
+    toast("Already in your stops"); closeModal(); renderSectorDetail(); return;
+  }
+  list.push({ oid:"man"+Date.now(), name:c.name, cat:c.cat||"Business",
+    lat:c.lat, lon:c.lon, addr:c.addr, status:"new", note:"", order:null, manual:true });
+  save(); closeModal(); renderSectorDetail(); drawSectorMarkers();
+  toast("Added — check the pin on the map ✋");
+}
+
+/* ---------------- curated lists (./sector-data/<ID>-curated.json) ----------------
+   Accepts either a plain array or an object with a .stops array (like
+   S001-bandra-west.json), and either {name,cat,…} or {name,category,…} fields.
+   Rating/review counts are kept and shown when present. */
+let sectorCuratedCache = {};
+async function sectorCuratedData(s){
+  if(sectorCuratedCache[s.id] !== undefined) return sectorCuratedCache[s.id];
+  let raw = null;
+  const urls = ["./sector-data/"+s.id+"-curated.json"];
+  if(s.id==="S001") urls.push("./sector-data/S001-bandra-west.json");
+  for(let u=0; u<urls.length; u++){
+    try{
+      const r = await fetch(urls[u]);
+      if(r.ok){ raw = await r.json(); break; }
+    }catch(e){}
+  }
+  let arr = [];
+  if(raw){
+    const items = Array.isArray(raw) ? raw : (raw.stops || []);
+    arr = items.map(function(it){
+      if(!it || !it.name) return null;
+      const lat = parseFloat(it.lat), lon = parseFloat(it.lon);
+      if(!(lat && lon)) return null;
+      return {
+        oid:"cur-"+String(it.name).toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").slice(0,40),
+        name:it.name, cat:it.cat||it.category||"Business",
+        addr:it.addr||it.area||it.address||"",
+        lat:lat, lon:lon,
+        rating:it.rating||null, reviews:it.reviews||null,
+        curated:true
+      };
+    }).filter(Boolean);
+  }
+  sectorCuratedCache[s.id] = arr;
+  return arr;
+}
+function sectorCuratedProbe(){
+  const s = sectorById(currentSector); if(!s) return;
+  sectorCuratedData(s).then(function(arr){
+    const b = document.getElementById("sec-curated-btn");
+    if(b) b.style.display = arr.length? "" : "none";
+  });
+}
+async function sectorLoadCurated(){
+  const s = sectorById(currentSector); if(!s) return;
+  const arr = await sectorCuratedData(s);
+  if(!arr.length){ toast("No curated list for this sector"); return; }
+  const list = sectorStops(s.id);
+  let added = 0;
+  arr.forEach(function(c){
+    const norm = c.name.toLowerCase().trim();
+    const dup = list.some(function(p){
+      return p.oid===c.oid || (p.name||"").toLowerCase().trim()===norm;
+    });
+    if(!dup){
+      list.push({ oid:c.oid, name:c.name, cat:c.cat, lat:c.lat, lon:c.lon,
+        addr:c.addr, rating:c.rating, reviews:c.reviews,
+        status:"new", note:"", order:null, curated:true });
+      added++;
+    }
+  });
+  save(); renderSectorDetail(); drawSectorMarkers();
+  toast(added? added+" curated spots added 📂" : "Curated list already loaded ✓");
+}
+
+/* ---------------- sector route ---------------- */
+async function sectorBuildRoute(){
+  const s = sectorById(currentSector); if(!s) return;
+  const list = sectorStops(s.id);
+  if(!list.length){ toast("Find businesses first"); return; }
+  toast("Getting your location…");
+  let start;
+  try{ start = await getPos(9000); }
+  catch(e){ start = {lat:s.lat, lon:s.lon}; toast("GPS off — starting from sector center"); }
+  toast("Optimizing "+list.length+" stops…");
+  const pts = list.map(function(p){return {lat:p.lat, lon:p.lon};});
+  const matrix = pts.length<=100 ? await osrmTable(start, pts) : null;
+  const order = routeOrder(matrix, start, pts);
+  order.forEach(function(pi,i){ list[pi].order = i+1; });
+  list.sort(function(a,b){return (a.order||9999)-(b.order||9999);});
+  db.sectorMeta = db.sectorMeta||{};
+  db.sectorMeta[s.id] = {startLat:start.lat, startLon:start.lon};
+  save(); renderSectorDetail(); drawSectorMarkers();
+  toast("Route ready — stop 1 → stop "+list.length+" 🧭");
+}
+function sectorOpenMapsChunk(){
+  const s = sectorById(currentSector); if(!s) return;
+  const list = (db.sectors[s.id]||[]).filter(function(p){return p.order && p.status!=="bought" && p.status!=="no";})
+    .sort(function(a,b){return a.order-b.order;}).slice(0,9);
+  if(!list.length){ toast("Nothing left to visit here 🎉"); return; }
+  const meta = (db.sectorMeta&&db.sectorMeta[s.id]) || {startLat:s.lat, startLon:s.lon};
   const origin = meta.startLat+","+meta.startLon;
   const dest = list[list.length-1].lat+","+list[list.length-1].lon;
   const wp = list.slice(0,-1).map(function(p){return p.lat+","+p.lon;}).join("|");

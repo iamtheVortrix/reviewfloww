@@ -1,6 +1,6 @@
 // NFC REVIEW TOOL — service worker (basic offline caching for the PWA shell)
 // Bump CACHE name whenever you change the frontend files.
-const CACHE = "nfc-review-v1";
+const CACHE = "nfc-review-v2-sectors";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./template-generator.js", "./icon.svg"];
 
 self.addEventListener("install", function (e) {
